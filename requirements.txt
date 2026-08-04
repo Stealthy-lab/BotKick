@@ -1,0 +1,4 @@
+pyTelegramBotAPI==4.15.2
+tls-client==1.0.1
+websockets==12.0
+fake-useragent==1.4.0
