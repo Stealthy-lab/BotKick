@@ -80,7 +80,7 @@ def es_autorizado(message_or_call):
     user_id = str(message_or_call.from_user.id)
     return user_id in usuarios_autorizados
 
-# --- DICCIONARIO DE SESIONES (MULTIUSUARIO / MULTITAREA) ---
+# --- DICCIONARIO DE SESIONES ---
 SESIONES = {}
 lock = threading.Lock()
 
@@ -136,13 +136,14 @@ def get_token(proxy_url=None):
         pass
     return None
 
-# --- BUCLE DE CONEXIÓN CON SOPORTE DE PROXY WSS ---
+# --- BUCLE DE CONEXIÓN CON LOGS INTEGRADOS ---
 async def websocket_handler(token, session_id, proxy_url):
     if session_id not in SESIONES:
         return
     
     sesion = SESIONES[session_id]
     connected = False
+    proxy_tag = proxy_url if proxy_url else "CONEXIÓN DIRECTA (Sin Proxy)"
     
     try:
         url = f"wss://websockets.kick.com/viewer/v1/connect?token={token}"
@@ -153,6 +154,7 @@ async def websocket_handler(token, session_id, proxy_url):
                 with lock:
                     sesion['connections'] += 1
                 connected = True
+                print(f"[LOG-SUCCESS] 🟢 Conexión WebSocket EXITOSA | Proxy: {proxy_tag}")
                 
                 handshake = {
                     "type": "channel_handshake",
@@ -177,6 +179,7 @@ async def websocket_handler(token, session_id, proxy_url):
                 with lock:
                     sesion['connections'] += 1
                 connected = True
+                print(f"[LOG-SUCCESS] 🟢 Conexión WebSocket EXITOSA (Directa)")
                 
                 handshake = {
                     "type": "channel_handshake",
@@ -196,8 +199,8 @@ async def websocket_handler(token, session_id, proxy_url):
                         if sesion['stop_signal']:
                             break
                         await asyncio.sleep(1)
-    except:
-        pass
+    except Exception as e:
+        print(f"[LOG-ERROR] 🔴 Conexión FALLIDA | Proxy: {proxy_tag} | Razón: {str(e)}")
     finally:
         if connected and session_id in SESIONES:
             with lock:
@@ -221,8 +224,10 @@ def send_connection(session_id):
             asyncio.set_event_loop(loop)
             loop.run_until_complete(websocket_handler(token, session_id, proxy_url))
             loop.close()
-    except:
-        pass
+        else:
+            print(f"[LOG-WARN] ⚠️ No se pudo obtener el Token de Kick usando el proxy: {proxy_url if proxy_url else 'Directo'}")
+    except Exception as e:
+        print(f"[LOG-ERROR] 🔴 Error general en hilo de conexión: {str(e)}")
     finally:
         if session_id in SESIONES:
             sesion['thread_limit'].release()
@@ -235,12 +240,15 @@ def core_runner(session_id):
     channel_id, viewers, is_live = get_channel_info_and_viewers(sesion['channel'])
     if not channel_id:
         sesion['status'] = "❌ Error: Canal no encontrado"
+        print(f"[LOG-ERROR] Canal '{sesion['channel']}' no encontrado en la API de Kick.")
         return
 
     sesion['channel_id'] = channel_id
     sesion['live_viewers'] = viewers
     sesion['is_live'] = is_live
     sesion['status'] = "🟢 En ejecución"
+    
+    print(f"\n[LOG-INIT] 🚀 Iniciando envío de vistas para '{sesion['channel']}' (ID: {channel_id}) con {sesion['max_threads']} hilos max.")
     
     while not sesion['stop_signal']:
         if sesion['thread_limit'].acquire(timeout=1):
@@ -251,6 +259,7 @@ def core_runner(session_id):
             time.sleep(0.35)
 
     sesion['status'] = "🔴 Detenido"
+    print(f"[LOG-STOP] 🛑 Sesión detenida para el canal: {sesion['channel']}\n")
 
 # --- GENERADOR DEL PANEL TÁCTIL ---
 def generar_panel_ui(session_id):
